@@ -255,6 +255,56 @@ func TestSaveProviderPersistsReasoningProtocol(t *testing.T) {
 	t.Fatalf("Settings() missing saved provider: %+v", view.Providers)
 }
 
+func TestSaveProviderPreservesHiddenProviderFields(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	cfg.Providers = []config.ProviderEntry{{
+		Name:          "mimo-pro",
+		Kind:          "openai",
+		BaseURL:       "https://token-plan-cn.xiaomimimo.com/v1",
+		Model:         "mimo-v2.5-pro",
+		APIKeyEnv:     "MIMO_API_KEY",
+		ContextWindow: 1_000_000,
+		NoProxy:       true,
+		Price:         &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"},
+	}}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save seeded config: %v", err)
+	}
+
+	app := NewApp()
+	if err := app.SaveProvider(ProviderView{
+		Name:          "mimo-pro",
+		Kind:          "openai",
+		BaseURL:       "https://token-plan-cn.xiaomimimo.com/v1",
+		Models:        []string{"mimo-v2.5-pro", "mimo-v2.6-pro"},
+		Default:       "mimo-v2.6-pro",
+		APIKeyEnv:     "MIMO_API_KEY",
+		ContextWindow: 1_000_000,
+	}); err != nil {
+		t.Fatalf("SaveProvider: %v", err)
+	}
+
+	gotCfg := config.LoadForEdit(config.UserConfigPath())
+	got, ok := gotCfg.Provider("mimo-pro")
+	if !ok {
+		t.Fatal("saved provider not found")
+	}
+	if !got.NoProxy {
+		t.Fatalf("SaveProvider cleared no_proxy: %+v", got)
+	}
+	if got.Price == nil || got.Price.Input != 3 || got.Price.Output != 6 || got.Price.Currency != "¥" {
+		t.Fatalf("SaveProvider failed to preserve price: %+v", got.Price)
+	}
+	if got.DefaultModel() != "mimo-v2.6-pro" {
+		t.Fatalf("default model = %q, want mimo-v2.6-pro", got.DefaultModel())
+	}
+	if got.ModelList()[0] != "mimo-v2.5-pro" || got.ModelList()[1] != "mimo-v2.6-pro" {
+		t.Fatalf("models = %+v, want refreshed list", got.ModelList())
+	}
+}
+
 func TestMigrateDesktopPreferencesDoesNotOverwriteExistingConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
